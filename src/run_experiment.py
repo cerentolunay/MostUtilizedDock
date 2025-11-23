@@ -9,8 +9,7 @@ import matplotlib.pyplot as plt
 from sequential import sequential_best_row
 from dac import dac_best_row
 
-
-# Proje yolları
+# Ana klasör yapısı
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
 RESULTS_DIR = ROOT_DIR / "results"
@@ -24,17 +23,22 @@ TIMINGS_CSV = RESULTS_DIR / "timings.csv"
 
 def time_method(func, U: np.ndarray, n_runs: int = 20) -> tuple[float, float, list[float]]:
     """
-    Bir metodu aynı U üzerinde n_runs kez çalıştırır,
-    çalışma sürelerinin ortalamasını ve std sapmasını döndürür.
-    Ayrıca tüm tekil süreleri (times) de döndürür.
+    Verilen fonksiyonu (sequential veya D&C) aynı U matrisi üzerinde
+    n_runs kez çalıştırıp çalışma sürelerini ölçer.
+
+    Dönüş:
+        mean → ortalama süre
+        std  → standart sapma
+        times → her tekrarın tekil çalışma süreleri
     """
+
     times: list[float] = []
 
-    # Küçük bir warm-up (cache, import vs. etkilerini azaltmak için)
+    # Küçük bir warm-up: cache, import, ilk çağrı overhead'ini azaltır
     func(U)
 
     for _ in range(n_runs):
-        t0 = time.perf_counter()
+        t0 = time.perf_counter()      # yüksek çözünürlüklü zaman ölçer
         func(U)
         t1 = time.perf_counter()
         times.append(t1 - t0)
@@ -45,18 +49,12 @@ def time_method(func, U: np.ndarray, n_runs: int = 20) -> tuple[float, float, li
     return mean, std, times
 
 
-def append_timings_csv(
-    method: str,
-    R: int,
-    T: int,
-    times: list[float],
-    csv_path: Path = TIMINGS_CSV,
-) -> None:
+def append_timings_csv(method: str, R: int, T: int, times: list[float], csv_path: Path = TIMINGS_CSV) -> None:
     """
-    Tek bir (method, R, T) kombinasyonu için tüm repeat sürelerini
+    Her (method, R, T) kombinasyonu için tüm tekil çalışmaları
     results/timings.csv dosyasına yazar.
 
-    Format:
+    CSV formatı:
         method,R,T,repeat,seconds
     """
     csv_path = Path(csv_path)
@@ -65,7 +63,7 @@ def append_timings_csv(
     with csv_path.open("a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
 
-        # İlk defa yazıyorsak header ekle
+        # İlk kez yazılıyorsa header ekle
         if not file_exists:
             writer.writerow(["method", "R", "T", "repeat", "seconds"])
 
@@ -75,8 +73,9 @@ def append_timings_csv(
 
 def run_correctness_check(U: np.ndarray) -> dict:
     """
-    Sequential ve D&C sonuçlarının aynı olup olmadığını kontrol eder.
+    Sequential ve D&C algoritmalarının aynı sonucu üretip üretmediğini test eder.
     """
+
     idx_seq, cnt_seq = sequential_best_row(U)
     idx_dac, cnt_dac = dac_best_row(U)
 
@@ -86,9 +85,9 @@ def run_correctness_check(U: np.ndarray) -> dict:
     print(f"Sequential → best row = {idx_seq}, ones = {cnt_seq}")
     print(f"D&C        → best row = {idx_dac}, ones = {cnt_dac}")
     if equal:
-        print("✅ OK: Sequential ve D&C aynı sonucu verdi.\n")
+        print("✓ OK: Sequential ve D&C aynı sonucu verdi.\n")
     else:
-        print("⚠ WARNING: Sequential ve D&C sonuçları FARKLI!\n")
+        print("⚠ WARNING: FARKLI SONUÇ ÜRETİLDİ!\n")
 
     return {
         "sequential": {"best_row": int(idx_seq), "ones": int(cnt_seq)},
@@ -99,8 +98,8 @@ def run_correctness_check(U: np.ndarray) -> dict:
 
 def run_full_matrix_timing(U: np.ndarray, n_runs: int = 20) -> dict:
     """
-    Tam U matrisi üzerinde sequential ve D&C için runtime istatistiklerini ölçer.
-    Ayrıca tekil süreleri timings.csv'ye yazar.
+    Tam U matrisi üzerinde sequential ve D&C algoritmalarının runtime ölçümünü yapar.
+    Sonuçları CSV'ye kaydeder.
     """
     R, T = U.shape
     print("=== Full Matrix Timing ===")
@@ -109,12 +108,11 @@ def run_full_matrix_timing(U: np.ndarray, n_runs: int = 20) -> dict:
     seq_mean, seq_std, seq_times = time_method(sequential_best_row, U, n_runs=n_runs)
     dac_mean, dac_std, dac_times = time_method(dac_best_row, U, n_runs=n_runs)
 
-    # CSV'ye yaz
     append_timings_csv("sequential_full", R, T, seq_times)
     append_timings_csv("dac_full", R, T, dac_times)
 
-    print(f"Sequential: mean = {seq_mean:.6f} s, std = {seq_std:.6f} s")
-    print(f"D&C       : mean = {dac_mean:.6f} s, std = {dac_std:.6f} s\n")
+    print(f"Sequential → mean = {seq_mean:.6f}s, std = {seq_std:.6f}s")
+    print(f"D&C        → mean = {dac_mean:.6f}s, std = {dac_std:.6f}s\n")
 
     return {
         "n_runs": n_runs,
@@ -125,20 +123,19 @@ def run_full_matrix_timing(U: np.ndarray, n_runs: int = 20) -> dict:
 
 def run_scale_experiment(U: np.ndarray, n_runs: int = 10) -> dict:
     """
-    Farklı T (sütun sayısı) değerleri için sequential ve D&C runtime'larını ölçer,
-    timings.csv'ye ekler ve runtime vs T grafiğini üretir.
+    T (sütun sayısı) farklılaştırılarak (48, 96, 144 vs.)
+    her iki metodun çalışma sürelerini ölçer ve runtime-vs-T grafiğini üretir.
     """
     R, T_full = U.shape
 
-    # T değerlerini, T_full'e göre eşit aralıklı seçeceğiz
-    # Örn: 48, 96, 144, 192, 240, 288 (T_full = 288 ise)
+    # T değerlerini otomatik oluştur: 6 eşit parça
     num_points = 6
     T_values = sorted(set(int(T_full * k / num_points) for k in range(1, num_points + 1)))
     T_values = [T for T in T_values if T > 0]
 
     print("=== Runtime vs T (Scale Experiment) ===")
-    print(f"R sabit = {R}, T değişiyor: {T_values}")
-    print(f"Her nokta için runs={n_runs}\n")
+    print(f"R sabit = {R}, T değerleri: {T_values}")
+    print(f"Her T için {n_runs} tekrar yapılıyor.\n")
 
     seq_means = []
     dac_means = []
@@ -148,16 +145,15 @@ def run_scale_experiment(U: np.ndarray, n_runs: int = 10) -> dict:
     per_T_results: dict[str, dict] = {}
 
     for T in T_values:
-        U_sub = U[:, :T]  # ilk T sütunu kullan
+        U_sub = U[:, :T]  # sadece ilk T sütun
 
         print(f"-- T = {T} --")
         seq_mean, seq_std, seq_times = time_method(sequential_best_row, U_sub, n_runs=n_runs)
         dac_mean, dac_std, dac_times = time_method(dac_best_row, U_sub, n_runs=n_runs)
 
-        print(f"Sequential: mean = {seq_mean:.6f} s, std = {seq_std:.6f} s")
-        print(f"D&C       : mean = {dac_mean:.6f} s, std = {dac_std:.6f} s\n")
+        print(f"Sequential → mean = {seq_mean:.6f}s, std = {seq_std:.6f}s")
+        print(f"D&C        → mean = {dac_mean:.6f}s, std = {dac_std:.6f}s\n")
 
-        # CSV'ye yaz
         append_timings_csv("sequential_T", R, T, seq_times)
         append_timings_csv("dac_T", R, T, dac_times)
 
@@ -171,13 +167,13 @@ def run_scale_experiment(U: np.ndarray, n_runs: int = 10) -> dict:
             "dac": {"mean": dac_mean, "std": dac_std},
         }
 
-    # Runtime vs T grafiği
+    # Grafik oluşturma
     plt.figure(figsize=(8, 5))
     plt.plot(T_values, seq_means, marker="o", label="Sequential")
     plt.plot(T_values, dac_means, marker="o", label="Divide & Conquer")
     plt.xlabel("Number of time slots (T)")
     plt.ylabel("Runtime (seconds)")
-    plt.title("Runtime vs T for Sequential and D&C Methods")
+    plt.title("Runtime vs T for Sequential and D&C")
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
@@ -199,9 +195,11 @@ def run_scale_experiment(U: np.ndarray, n_runs: int = 10) -> dict:
 
 
 def main():
+    # Önceki ölçüm CSV’si varsa sil
     if TIMINGS_CSV.exists():
         TIMINGS_CSV.unlink()
 
+    # Occupancy matrix'i yükle
     occ_path = DATA_DIR / "occupancy.csv"
     if not occ_path.exists():
         raise FileNotFoundError(f"occupancy.csv bulunamadı: {occ_path}")
@@ -213,13 +211,13 @@ def main():
     # 1) Doğruluk testi
     correctness = run_correctness_check(U)
 
-    # 2) Tam matris üzerinde runtime testi
+    # 2) Tam matris runtime testi
     full_timing = run_full_matrix_timing(U, n_runs=20)
 
-    # 3) Farklı T değerleri için ölçekleme deneyi
+    # 3) Farklı T değerlerinde ölçekleme deneyi
     scale_results = run_scale_experiment(U, n_runs=10)
 
-    # 4) Özet sonuçları JSON olarak kaydet (opsiyonel ama faydalı)
+    # 4) Sonuçları JSON'a kaydet
     results = {
         "U_shape": {"R": int(R), "T": int(T)},
         "correctness": correctness,
@@ -231,8 +229,8 @@ def main():
     with json_path.open("w", encoding="utf-8") as f:
         json.dump(results, f, indent=4)
 
-    print(f"✓ Özet sonuçlar JSON olarak kaydedildi: {json_path}")
-    print(f"✓ Tekil zaman ölçümleri CSV olarak kaydedildi: {TIMINGS_CSV}")
+    print(f"✓ JSON sonuç kaydedildi → {json_path}")
+    print(f"✓ Tekil ölçümler CSV kaydedildi → {TIMINGS_CSV}")
 
 
 if __name__ == "__main__":
